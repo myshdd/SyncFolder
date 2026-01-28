@@ -653,7 +653,7 @@ Test-Path "C:\test_dir\Project\MyApp" -PathType Container
 
 ## Лицензия
 
-Укажите здесь выбранную лицензию вашего проекта (например, MIT, Apache 2.0 и т.д.).
+Copyright (c) 2026 Мышкин Денис
 
 ```
 
