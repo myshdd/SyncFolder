@@ -653,7 +653,8 @@ Test-Path "C:\test_dir\Project\MyApp" -PathType Container
 
 ## Лицензия
 
-Copyright (c) 2026 Мышкин Денис
+Проект распространяется по лицензии MIT.
+Подробности см. в файле [LICENSE](LICENSE).
 
 ```
 
