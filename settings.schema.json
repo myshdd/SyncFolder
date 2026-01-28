@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SyncFolder Settings",
+  "description": "Схема для файла settings.json, используемого скриптом syncfolder.ps1",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Ссылка на JSON-схему (используется редакторами, самим скриптом не читается)."
+    },
+    "SourcePath": {
+      "type": "string",
+      "description": "Путь к исходной папке (левая папка). Может быть абсолютным или относительным."
+    },
+    "DestinationPath": {
+      "type": "string",
+      "description": "Путь к папке назначения (правая папка). Может быть абсолютным или относительным."
+    },
+    "SyncDirection": {
+      "type": "string",
+      "description": "Направление синхронизации: LeftToRight, RightToLeft или Both.",
+      "enum": [
+        "LeftToRight",
+        "RightToLeft",
+        "Both"
+      ]
+    },
+    "ExcludeDirectories": {
+      "type": "array",
+      "description": "Список имён подпапок, которые нужно исключить из синхронизации (например, .git, node_modules).",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "CompareMode": {
+      "type": "string",
+      "description": "Режим сравнения файлов: TimeAndSize (по дате изменения и размеру) или ContentHash (по хэшу содержимого).",
+      "enum": [
+        "TimeAndSize",
+        "ContentHash"
+      ],
+      "default": "TimeAndSize"
+    },
+    "IncludePatterns": {
+      "type": "array",
+      "description": "Список масок файлов, которые нужно включать (например, *.docx, *.pdf). Если не задано, берутся все файлы.",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "ExcludePatterns": {
+      "type": "array",
+      "description": "Список масок файлов, которые нужно исключить (например, *.tmp, *.bak). Если IncludePatterns пустой — берём все файлы, кроме тех, что попали под ExcludePatterns. Если IncludePatterns задан — берём только те, что подходят по IncludePatterns, и при этом не подходят по ExcludePatterns.",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "LogPath": {
+      "type": "string",
+      "description": "Базовый путь к лог-файлу. Реальный лог создаётся как <имя>-YYYY-MM-DD<расширение> в той же директории."
+    },
+    "LogRetentionDays": {
+      "type": "integer",
+      "description": "Число дней, в течение которых хранятся лог-файлы. Логи старше будут удалены. 0 или отсутствие значения — без удаления.",
+      "minimum": 0
+    },
+    "TwoWayDeletionSide": {
+      "type": "string",
+      "description": "Для двусторонней синхронизации: на какой стороне разрешено удаление файлов. None - без удаления, Source - удалять только в Destination, Destination - удалять только в Source.",
+      "enum": [
+        "None",
+        "Source",
+        "Destination"
+      ],
+      "default": "None"
+    }
+  },
+  "additionalProperties": false
+}

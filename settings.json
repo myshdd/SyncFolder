@@ -1,0 +1,24 @@
+{
+  "$schema": "./settings.schema.json",
+  "SourcePath": "C:\\test_dir\\Project\\MyApp",
+  "DestinationPath": "C:\\test_dir\\Backup\\MyApp",
+  "SyncDirection": "Both",
+  "CompareMode": "TimeAndSize",
+  "ExcludeDirectories": [
+    ".git",
+    "node_modules",
+    ".vs",
+    "bin",
+    "obj"
+  ],
+  "IncludePatterns": [
+  ],
+  "ExcludePatterns": [
+    "~*",
+    "*.tmp",
+    "*.bak"
+  ],
+  "LogPath": "C:\\test_dir\\Logs\\syncfolder.log",
+  "LogRetentionDays": 7,
+  "TwoWayDeletionSide": "Source"
+}
