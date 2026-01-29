@@ -1,7 +1,19 @@
 {
   "$schema": "./settings.schema.json",
-  "SourcePath": "C:\\test_dir\\Project\\MyApp",
-  "DestinationPath": "C:\\test_dir\\Backup\\MyApp",
+  "FolderPairs": [
+    {
+      "Source": "C:\\test_dir\\Project\\MyApp1",
+      "Destination": "C:\\test_dir\\Backup\\MyApp1"
+    },
+    {
+      "Source": "C:\\test_dir\\Project\\MyApp2",
+      "Destination": "C:\\test_dir\\Backup\\MyApp2"
+    },
+    {
+      "Source": "C:\\test_dir\\Project\\MyApp3",
+      "Destination": "C:\\test_dir\\Backup\\MyApp3"
+    }
+  ],
   "SyncDirection": "Both",
   "CompareMode": "TimeAndSize",
   "ExcludeDirectories": [

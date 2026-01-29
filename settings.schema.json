@@ -1,20 +1,32 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "SyncFolder Settings",
-  "description": "Схема для файла settings.json, используемого скриптом syncfolder.ps1",
+  "description": "Схема для файла settings.json, используемого скриптом syncfolder.ps1. Поддерживает несколько пар папок через массив.",
   "type": "object",
   "properties": {
     "$schema": {
       "type": "string",
       "description": "Ссылка на JSON-схему (используется редакторами, самим скриптом не читается)."
     },
-    "SourcePath": {
-      "type": "string",
-      "description": "Путь к исходной папке (левая папка). Может быть абсолютным или относительным."
-    },
-    "DestinationPath": {
-      "type": "string",
-      "description": "Путь к папке назначения (правая папка). Может быть абсолютным или относительным."
+    "FolderPairs": {
+      "type": "array",
+      "description": "Массив пар папок для синхронизации.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "Source": {
+            "type": "string",
+            "description": "Путь к исходной папке. Может быть абсолютным или относительным."
+          },
+          "Destination": {
+            "type": "string",
+            "description": "Путь к папке назначения. Может быть абсолютным или относительным."
+          }
+        },
+        "required": ["Source", "Destination"],
+        "additionalProperties": false
+      },
+      "minItems": 1
     },
     "SyncDirection": {
       "type": "string",
@@ -78,5 +90,6 @@
       "default": "None"
     }
   },
+  "required": ["FolderPairs", "SyncDirection"],
   "additionalProperties": false
 }

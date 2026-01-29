@@ -1,12 +1,24 @@
 ﻿<#
 .SYNOPSIS
-Скрипт для синхронизации двух папок с возможностью выбора направления и режима сравнения файлов.
+Скрипт для синхронизации нескольких пар папок с возможностью выбора направления и режима сравнения файлов.
 
 .DESCRIPTION
-Скрипт синхронизирует содержимое двух папок с тремя вариантами направления:
+Скрипт синхронизирует содержимое нескольких пар папок с тремя вариантами направления:
 - LeftToRight  (из Source в Destination)
 - RightToLeft  (из Destination в Source)
 - Both         (двусторонняя синхронизация: обновление с обеих сторон)
+
+Поддерживает несколько пар папок через массив FolderPairs:
+[
+  {
+    "Source": "C:\\test_dir\\Project\\MyApp1",
+    "Destination": "C:\\test_dir\\Backup\\MyApp1"
+  },
+  {
+    "Source": "C:\\test_dir\\Project\\MyApp2",
+    "Destination": "C:\\test_dir\\Backup\\MyApp2"
+  }
+]
 
 Режимы сравнения файлов (CompareMode):
 - TimeAndSize  — по дате изменения и размеру файла (быстро, по умолчанию)
@@ -27,10 +39,6 @@
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param (
-    [string]$SourcePath,
-
-    [string]$DestinationPath,
-
     [ValidateSet("LeftToRight", "RightToLeft", "Both")]
     [string]$SyncDirection,
 
@@ -64,6 +72,9 @@ $script:RunId = "{0}-{1:0000}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), (Get-Ran
 # Фактический путь к лог-файлу за текущий день
 $script:LogFilePath = $null
 
+# Массив пар папок для синхронизации
+$script:FolderPairs = @()
+
 # ---- Автопоиск settings.json рядом со скриптом, если SettingsPath не задан ----
 
 if (-not $SettingsPath) {
@@ -89,14 +100,37 @@ if ($SettingsPath) {
         throw $msg
     }
 
-    if (-not $SourcePath -and $config.SourcePath) {
-        $SourcePath = [string]$config.SourcePath
+    # ---- Извлечение пар папок из настроек ----
+
+    # Основной способ: массив FolderPairs
+    if ($config.FolderPairs) {
+        try {
+            $pairIndex = 1
+            foreach ($pair in $config.FolderPairs) {
+                if (-not $pair.Source -or -not $pair.Destination) {
+                    Write-Warning "Найдена неполная пара папок в FolderPairs: $($pair | ConvertTo-Json -Compress)"
+                    continue
+                }
+
+                $script:FolderPairs += @{
+                    Source      = [string]$pair.Source
+                    Destination = [string]$pair.Destination
+                    Number      = $pairIndex.ToString()
+                }
+                $pairIndex++
+            }
+        }
+        catch {
+            Write-Warning "Ошибка при обработке FolderPairs: $_"
+        }
     }
 
-    if (-not $DestinationPath -and $config.DestinationPath) {
-        $DestinationPath = [string]$config.DestinationPath
+    # Если FolderPairs не найден или пуст
+    if ($script:FolderPairs.Count -eq 0) {
+        throw "Не указаны пары папок для синхронизации в настройках (отсутствует или пуст параметр FolderPairs)."
     }
 
+    # Остальные настройки
     if (-not $SyncDirection -and $config.SyncDirection) {
         if ($config.SyncDirection -notin $validDirections) {
             $msg = "SyncDirection из settings.json имеет недопустимое значение: {0}. Допустимые: {1}" -f $config.SyncDirection, ($validDirections -join ', ')
@@ -144,12 +178,10 @@ if ($SettingsPath) {
 
 # ---- Значения по умолчанию и финальная валидация ----
 
-if (-not $SourcePath) {
-    throw "Не указан SourcePath (ни параметром, ни в settings.json)."
+if ($script:FolderPairs.Count -eq 0) {
+    throw "Не указаны пары папок для синхронизации (в settings.json отсутствует параметр FolderPairs)."
 }
-if (-not $DestinationPath) {
-    throw "Не указан DestinationPath (ни параметром, ни в settings.json)."
-}
+
 if (-not $SyncDirection) {
     throw "Не указан SyncDirection (ни параметром, ни в settings.json)."
 }
@@ -376,7 +408,9 @@ function Sync-Files {
         [ValidateSet("TimeAndSize", "ContentHash")]
         [string]$CompareMode,
 
-        [bool]$EnableDeletion = $false
+        [bool]$EnableDeletion = $false,
+
+        [string]$PairNumber = ""
     )
 
     $normalizedFromPath = (Resolve-Path -LiteralPath $FromPath).Path.TrimEnd('\', '/')
@@ -388,8 +422,18 @@ function Sync-Files {
         "Both" { "двусторонняя (обновление)" }
     }
 
-    Write-Host "Синхронизация $directionDescription ($normalizedFromPath -> $normalizedToPath) [CompareMode=$CompareMode, Deletion=$EnableDeletion]..." -ForegroundColor Cyan
-    Write-Log  "START: Mode=$Mode From='$normalizedFromPath' To='$normalizedToPath' CompareMode=$CompareMode Deletion=$EnableDeletion" "INFO"
+    $pairInfo = ""
+    if ($PairNumber) {
+        $pairInfo = " [Пара $PairNumber]"
+    }
+
+    Write-Host "Синхронизация $directionDescription$pairInfo ($normalizedFromPath -> $normalizedToPath) [CompareMode=$CompareMode, Deletion=$EnableDeletion]..." -ForegroundColor Cyan
+    if ($PairNumber) {
+        Write-Log  "START_SYNC_PAIR${PairNumber}: Mode=$Mode From='$normalizedFromPath' To='$normalizedToPath' CompareMode=$CompareMode Deletion=$EnableDeletion" "INFO"
+    }
+    else {
+        Write-Log  "START_SYNC: Mode=$Mode From='$normalizedFromPath' To='$normalizedToPath' CompareMode=$CompareMode Deletion=$EnableDeletion" "INFO"
+    }
 
     $sourceFiles = Get-ChildItem -LiteralPath $normalizedFromPath -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object {
@@ -422,6 +466,10 @@ function Sync-Files {
         $destHash[$relativePath] = $sig
     }
 
+    $newFilesCount = 0
+    $updatedFilesCount = 0
+    $deletedFilesCount = 0
+
     foreach ($key in $sourceHash.Keys) {
         $sourceFile = $sourceHash[$key]
         $destFile = if ($destHash.ContainsKey($key)) { $destHash[$key] } else { $null }
@@ -433,17 +481,28 @@ function Sync-Files {
             $destDir = [System.IO.Path]::GetDirectoryName($destFullPath)
 
             if (-not (Test-Path -LiteralPath $destDir)) {
-                Write-Host "Создаём директорию: $destDir" -ForegroundColor Yellow
+                Write-Host "  Создаём директорию: $destDir" -ForegroundColor Yellow
                 if ($PSCmdlet.ShouldProcess($destDir, "Создание директории")) {
                     New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-                    Write-Log "CREATE_DIR: '$destDir'" "ACTION"
+                    if ($PairNumber) {
+                        Write-Log "CREATE_DIR_PAIR${PairNumber}: '$destDir'" "ACTION"
+                    }
+                    else {
+                        Write-Log "CREATE_DIR: '$destDir'" "ACTION"
+                    }
                 }
             }
 
-            Write-Host "Копируем новый файл: $key" -ForegroundColor Green
+            Write-Host "  Копируем новый файл: $key" -ForegroundColor Green
             if ($PSCmdlet.ShouldProcess($destFullPath, "Копирование нового файла из '$sourceFullPath'")) {
                 Copy-Item -LiteralPath $sourceFullPath -Destination $destFullPath -Force
-                Write-Log "COPY_NEW: '$sourceFullPath' -> '$destFullPath'" "ACTION"
+                if ($PairNumber) {
+                    Write-Log "COPY_NEW_PAIR${PairNumber}: '$sourceFullPath' -> '$destFullPath'" "ACTION"
+                }
+                else {
+                    Write-Log "COPY_NEW: '$sourceFullPath' -> '$destFullPath'" "ACTION"
+                }
+                $newFilesCount++
             }
         }
         else {
@@ -462,10 +521,16 @@ function Sync-Files {
             }
 
             if ($needUpdate) {
-                Write-Host "Обновляем файл: $key" -ForegroundColor Blue
+                Write-Host "  Обновляем файл: $key" -ForegroundColor Blue
                 if ($PSCmdlet.ShouldProcess($destFullPath, "Обновление файла из '$($sourceFile.FullName)'")) {
                     Copy-Item -LiteralPath $sourceFile.FullName -Destination $destFullPath -Force
-                    Write-Log "COPY_UPDATE: '$($sourceFile.FullName)' -> '$destFullPath'" "ACTION"
+                    if ($PairNumber) {
+                        Write-Log "COPY_UPDATE_PAIR${PairNumber}: '$($sourceFile.FullName)' -> '$destFullPath'" "ACTION"
+                    }
+                    else {
+                        Write-Log "COPY_UPDATE: '$($sourceFile.FullName)' -> '$destFullPath'" "ACTION"
+                    }
+                    $updatedFilesCount++
                 }
             }
         }
@@ -475,10 +540,16 @@ function Sync-Files {
         foreach ($key in $destHash.Keys) {
             if (-not $sourceHash.ContainsKey($key)) {
                 $destFullPath = Join-Path -Path $normalizedToPath -ChildPath $key
-                Write-Host "Удаляем файл: $key" -ForegroundColor Red
+                Write-Host "  Удаляем файл: $key" -ForegroundColor Red
                 if ($PSCmdlet.ShouldProcess($destFullPath, "Удаление файла")) {
                     Remove-Item -LiteralPath $destFullPath -Force -ErrorAction SilentlyContinue
-                    Write-Log "DELETE_FILE: '$destFullPath'" "ACTION"
+                    if ($PairNumber) {
+                        Write-Log "DELETE_FILE_PAIR${PairNumber}: '$destFullPath'" "ACTION"
+                    }
+                    else {
+                        Write-Log "DELETE_FILE: '$destFullPath'" "ACTION"
+                    }
+                    $deletedFilesCount++
                 }
             }
         }
@@ -495,17 +566,28 @@ function Sync-Files {
             if (-not (Test-Path -LiteralPath $sourceDirPath)) {
                 $items = Get-ChildItem -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 1
                 if ($null -eq $items) {
-                    Write-Host "Удаляем пустую директорию: $relativePath" -ForegroundColor Magenta
+                    Write-Host "  Удаляем пустую директорию: $relativePath" -ForegroundColor Magenta
                     if ($PSCmdlet.ShouldProcess($dir.FullName, "Удаление пустой директории")) {
                         Remove-Item -LiteralPath $dir.FullName -Force -Recurse -ErrorAction SilentlyContinue
-                        Write-Log "DELETE_DIR: '$($dir.FullName)'" "ACTION"
+                        if ($PairNumber) {
+                            Write-Log "DELETE_DIR_PAIR${PairNumber}: '$($dir.FullName)'" "ACTION"
+                        }
+                        else {
+                            Write-Log "DELETE_DIR: '$($dir.FullName)'" "ACTION"
+                        }
                     }
                 }
             }
         }
     }
 
-    Write-Log "END: Mode=$Mode From='$normalizedFromPath' To='$normalizedToPath'" "INFO"
+    if ($PairNumber) {
+        Write-Log "END_SYNC_PAIR${PairNumber}: Mode=$Mode From='$normalizedFromPath' To='$normalizedToPath' New=$newFilesCount Updated=$updatedFilesCount Deleted=$deletedFilesCount" "INFO"
+    }
+    else {
+        Write-Log "END_SYNC: Mode=$Mode From='$normalizedFromPath' To='$normalizedToPath' New=$newFilesCount Updated=$updatedFilesCount Deleted=$deletedFilesCount" "INFO"
+    }
+    Write-Host "  Сводка${pairInfo}: Новых: $newFilesCount, Обновлено: $updatedFilesCount, Удалено: $deletedFilesCount" -ForegroundColor Gray
 }
 
 # ---- Основной код ----
@@ -513,69 +595,97 @@ function Sync-Files {
 try {
     Initialize-Logging
 
-    if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {
-        throw "Исходная папка не существует: $SourcePath"
-    }
+    Write-Log "SCRIPT_START: Direction=$SyncDirection CompareMode=$CompareMode SettingsPath='$SettingsPath' PairsCount=$($script:FolderPairs.Count)" "INFO"
+    Write-Host "Начинаем синхронизацию $($script:FolderPairs.Count) пар папок..." -ForegroundColor Cyan
 
-    if (-not (Test-Path -LiteralPath $DestinationPath -PathType Container)) {
-        Write-Host "Папка назначения не существует, создаём: $DestinationPath" -ForegroundColor Yellow
-        if ($PSCmdlet.ShouldProcess($DestinationPath, "Создание папки назначения")) {
-            New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
-            Write-Log "CREATE_DIR: '$DestinationPath'" "ACTION"
+    foreach ($pair in $script:FolderPairs) {
+        $sourcePath = $pair.Source
+        $destinationPath = $pair.Destination
+        $pairNumber = $pair.Number
+
+        if ($pairNumber) {
+            Write-Host "`nОбработка пары (пара $pairNumber):" -ForegroundColor Yellow
         }
-    }
-
-    Write-Log "SCRIPT_START: Direction=$SyncDirection CompareMode=$CompareMode SettingsPath='$SettingsPath'" "INFO"
-
-    switch ($SyncDirection) {
-        "LeftToRight" {
-            Sync-Files -FromPath $SourcePath -ToPath $DestinationPath -Mode "LeftToRight" `
-                -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
-                -CompareMode $CompareMode -EnableDeletion:$true
+        else {
+            Write-Host "`nОбработка пары:" -ForegroundColor Yellow
         }
-        "RightToLeft" {
-            Sync-Files -FromPath $DestinationPath -ToPath $SourcePath -Mode "RightToLeft" `
-                -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
-                -CompareMode $CompareMode -EnableDeletion:$true
-        }
-        "Both" {
-            switch ($TwoWayDeletionSide) {
-                "Source" {
-                    Sync-Files -FromPath $SourcePath -ToPath $DestinationPath -Mode "Both" `
-                        -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
-                        -CompareMode $CompareMode -EnableDeletion:$true
+        Write-Host "  Источник: $sourcePath" -ForegroundColor White
+        Write-Host "  Назначение: $destinationPath" -ForegroundColor White
 
-                    Sync-Files -FromPath $DestinationPath -ToPath $SourcePath -Mode "Both" `
-                        -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
-                        -CompareMode $CompareMode -EnableDeletion:$false
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Container)) {
+            Write-Host "  Предупреждение: Исходная папка не существует: $sourcePath" -ForegroundColor Red
+            if ($pairNumber) {
+                Write-Log  "WARN_PAIR${pairNumber}: Исходная папка не существует: '$sourcePath'" "WARN"
+            }
+            else {
+                Write-Log  "WARN: Исходная папка не существует: '$sourcePath'" "WARN"
+            }
+            continue
+        }
+
+        if (-not (Test-Path -LiteralPath $destinationPath -PathType Container)) {
+            Write-Host "  Папка назначения не существует, создаём: $destinationPath" -ForegroundColor Yellow
+            if ($PSCmdlet.ShouldProcess($destinationPath, "Создание папки назначения")) {
+                New-Item -ItemType Directory -Path $destinationPath -Force | Out-Null
+                if ($pairNumber) {
+                    Write-Log "CREATE_DIR_PAIR${pairNumber}: '$destinationPath'" "ACTION"
                 }
-                "Destination" {
-                    Sync-Files -FromPath $SourcePath -ToPath $DestinationPath -Mode "Both" `
-                        -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
-                        -CompareMode $CompareMode -EnableDeletion:$false
-
-                    Sync-Files -FromPath $DestinationPath -ToPath $SourcePath -Mode "Both" `
-                        -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
-                        -CompareMode $CompareMode -EnableDeletion:$true
+                else {
+                    Write-Log "CREATE_DIR: '$destinationPath'" "ACTION"
                 }
-                "None" {
-                    Sync-Files -FromPath $SourcePath -ToPath $DestinationPath -Mode "Both" `
-                        -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
-                        -CompareMode $CompareMode -EnableDeletion:$false
+            }
+        }
 
-                    Sync-Files -FromPath $DestinationPath -ToPath $SourcePath -Mode "Both" `
-                        -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
-                        -CompareMode $CompareMode -EnableDeletion:$false
+        switch ($SyncDirection) {
+            "LeftToRight" {
+                Sync-Files -FromPath $sourcePath -ToPath $destinationPath -Mode "LeftToRight" `
+                    -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
+                    -CompareMode $CompareMode -EnableDeletion:$true -PairNumber $pairNumber
+            }
+            "RightToLeft" {
+                Sync-Files -FromPath $destinationPath -ToPath $sourcePath -Mode "RightToLeft" `
+                    -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
+                    -CompareMode $CompareMode -EnableDeletion:$true -PairNumber $pairNumber
+            }
+            "Both" {
+                switch ($TwoWayDeletionSide) {
+                    "Source" {
+                        Sync-Files -FromPath $sourcePath -ToPath $destinationPath -Mode "Both" `
+                            -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
+                            -CompareMode $CompareMode -EnableDeletion:$true -PairNumber $pairNumber
+
+                        Sync-Files -FromPath $destinationPath -ToPath $sourcePath -Mode "Both" `
+                            -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
+                            -CompareMode $CompareMode -EnableDeletion:$false -PairNumber $pairNumber
+                    }
+                    "Destination" {
+                        Sync-Files -FromPath $sourcePath -ToPath $destinationPath -Mode "Both" `
+                            -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
+                            -CompareMode $CompareMode -EnableDeletion:$false -PairNumber $pairNumber
+
+                        Sync-Files -FromPath $destinationPath -ToPath $sourcePath -Mode "Both" `
+                            -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
+                            -CompareMode $CompareMode -EnableDeletion:$true -PairNumber $pairNumber
+                    }
+                    "None" {
+                        Sync-Files -FromPath $sourcePath -ToPath $destinationPath -Mode "Both" `
+                            -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
+                            -CompareMode $CompareMode -EnableDeletion:$false -PairNumber $pairNumber
+
+                        Sync-Files -FromPath $destinationPath -ToPath $sourcePath -Mode "Both" `
+                            -ExcludeDirectories $ExcludeDirectories -IncludePatterns $IncludePatterns -ExcludePatterns $ExcludePatterns `
+                            -CompareMode $CompareMode -EnableDeletion:$false -PairNumber $pairNumber
+                    }
                 }
             }
         }
     }
 
-    Write-Log "SCRIPT_END: Direction=$SyncDirection" "INFO"
-    Write-Host "Синхронизация завершена." -ForegroundColor Green
+    Write-Log "SCRIPT_END: Direction=$SyncDirection PairsCount=$($script:FolderPairs.Count)" "INFO"
+    Write-Host "`nСинхронизация завершена. Обработано пар папок: $($script:FolderPairs.Count)" -ForegroundColor Green
 }
 catch {
-    Write-Host "Ошибка: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "`nОшибка: $($_.Exception.Message)" -ForegroundColor Red
     Write-Log  ("ERROR: {0}" -f $_.Exception.Message) "ERROR"
     exit 1
 }
